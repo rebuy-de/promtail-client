@@ -33,14 +33,6 @@ type ClientConfig struct {
 	PrintLevel LogLevel
 }
 
-type Client interface {
-	Debugf(format string, args ...interface{})
-	Infof(format string, args ...interface{})
-	Warnf(format string, args ...interface{})
-	Errorf(format string, args ...interface{})
-	Shutdown()
-}
-
 // http.Client wrapper for adding new methods, particularly sendJsonReq
 type httpClient struct {
 	parent http.Client
