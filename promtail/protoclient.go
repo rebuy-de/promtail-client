@@ -1,14 +1,15 @@
 package promtail
 
 import (
-	"fmt"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/timestamp"
-	"github.com/golang/snappy"
-	"github.com/afiskon/promtail-client/logproto"
+	"encoding/json"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/afiskon/promtail-client/logproto"
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/timestamp"
+	"github.com/golang/snappy"
 )
 
 type protoLogEntry struct {
@@ -16,7 +17,7 @@ type protoLogEntry struct {
 	level LogLevel
 }
 
-type clientProto struct {
+type Client struct {
 	config    *ClientConfig
 	quit      chan struct{}
 	entries   chan protoLogEntry
@@ -24,8 +25,8 @@ type clientProto struct {
 	client    httpClient
 }
 
-func NewClientProto(conf ClientConfig) (Client, error) {
-	client := clientProto{
+func NewClientProto(conf ClientConfig) (*Client, error) {
+	client := Client{
 		config:  &conf,
 		quit:    make(chan struct{}),
 		entries: make(chan protoLogEntry, LOG_ENTRIES_CHAN_SIZE),
@@ -38,24 +39,33 @@ func NewClientProto(conf ClientConfig) (Client, error) {
 	return &client, nil
 }
 
-func (c *clientProto) Debugf(format string, args ...interface{}) {
-	c.log(format, DEBUG, "Debug: ", args...)
+func (c *Client) Debug(data map[string]interface{}) {
+	c.log(DEBUG, "debug", data)
 }
 
-func (c *clientProto) Infof(format string, args ...interface{}) {
-	c.log(format, INFO, "Info: ", args...)
+func (c *Client) Info(data map[string]interface{}) {
+	c.log(INFO, "info", data)
 }
 
-func (c *clientProto) Warnf(format string, args ...interface{}) {
-	c.log(format, WARN, "Warn: ", args...)
+func (c *Client) Warn(data map[string]interface{}) {
+	c.log(WARN, "warning", data)
 }
 
-func (c *clientProto) Errorf(format string, args ...interface{}) {
-	c.log(format, ERROR, "Error: ", args...)
+func (c *Client) Error(data map[string]interface{}) {
+	c.log(ERROR, "error", data)
 }
 
-func (c *clientProto) log(format string, level LogLevel, prefix string, args ...interface{}) {
+func (c *Client) log(level LogLevel, levelText string, data map[string]interface{}) {
 	if (level >= c.config.SendLevel) || (level >= c.config.PrintLevel) {
+
+		data["level"] = levelText
+
+		buf, err := json.MarshalIndent(data, "", "    ")
+		if err != nil {
+			log.Printf("unable to marshal log data: %s\n", err)
+			return
+		}
+
 		now := time.Now().UnixNano()
 		c.entries <- protoLogEntry{
 			entry: &logproto.Entry{
@@ -63,19 +73,19 @@ func (c *clientProto) log(format string, level LogLevel, prefix string, args ...
 					Seconds: now / int64(time.Second),
 					Nanos:   int32(now % int64(time.Second)),
 				},
-				Line: fmt.Sprintf(prefix+format, args...),
+				Line: string(buf),
 			},
 			level: level,
 		}
 	}
 }
 
-func (c *clientProto) Shutdown() {
+func (c *Client) Shutdown() {
 	close(c.quit)
 	c.waitGroup.Wait()
 }
 
-func (c *clientProto) run() {
+func (c *Client) run() {
 	var batch []*logproto.Entry
 	batchSize := 0
 	maxWait := time.NewTimer(c.config.BatchWait)
@@ -118,7 +128,7 @@ func (c *clientProto) run() {
 	}
 }
 
-func (c *clientProto) send(entries []*logproto.Entry) {
+func (c *Client) send(entries []*logproto.Entry) {
 	var streams []*logproto.Stream
 	streams = append(streams, &logproto.Stream{
 		Labels:  c.config.Labels,
